@@ -1074,7 +1074,7 @@ private:
   std::string ca_cert_file_path_;
   std::string ca_cert_dir_path_;
   X509_STORE *ca_cert_store_ = nullptr;
-  bool server_certificate_verification_ = false;
+  bool server_certificate_verification_ = true;
   long verify_result_ = 0;
 
   friend class Client;
@@ -5547,19 +5547,25 @@ inline bool SSLClient::initialize_ssl(Socket &socket) {
   auto ssl = detail::ssl_new(
       socket.sock, ctx_, ctx_mutex_,
       [&](SSL *ssl) {
-        if (ca_cert_file_path_.empty() && ca_cert_store_ == nullptr) {
-          SSL_CTX_set_verify(ctx_, SSL_VERIFY_NONE, nullptr);
-        } else if (!ca_cert_file_path_.empty()) {
-          if (!SSL_CTX_load_verify_locations(ctx_, ca_cert_file_path_.c_str(),
-                                             nullptr)) {
-            return false;
+        if (server_certificate_verification_) {
+          if (!ca_cert_file_path_.empty()) {
+            if (!SSL_CTX_load_verify_locations(ctx_, ca_cert_file_path_.c_str(),
+                                               nullptr)) {
+              return false;
+            }
+          } else if (!ca_cert_dir_path_.empty()) {
+            if (!SSL_CTX_load_verify_locations(ctx_, nullptr,
+                                               ca_cert_dir_path_.c_str())) {
+              return false;
+            }
+          } else if (ca_cert_store_ != nullptr) {
+            if (SSL_CTX_get_cert_store(ctx_) != ca_cert_store_) {
+              SSL_CTX_set_cert_store(ctx_, ca_cert_store_);
+            }
+          } else {
+            SSL_CTX_set_default_verify_paths(ctx_);
           }
-          SSL_CTX_set_verify(ctx_, SSL_VERIFY_PEER, nullptr);
-        } else if (ca_cert_store_ != nullptr) {
-          if (SSL_CTX_get_cert_store(ctx_) != ca_cert_store_) {
-            SSL_CTX_set_cert_store(ctx_, ca_cert_store_);
-          }
-          SSL_CTX_set_verify(ctx_, SSL_VERIFY_PEER, nullptr);
+          SSL_set_verify(ssl, SSL_VERIFY_NONE, nullptr);
         }
 
         if (SSL_connect(ssl) != 1) { return false; }
